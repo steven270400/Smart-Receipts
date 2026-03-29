@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+paddlepaddle == 2.6.2
+paddleocr
+pillow
+python-multipart
+requests
+sqlalchemy
