@@ -1,9 +1,12 @@
-﻿from paddleocr import PaddleOCR
+try:
+    # Optional dependency. Keep the backend importable even when PaddleOCR
+    # isn't installed (e.g., CI/unit tests).
+    from paddleocr import PaddleOCR  # type: ignore
+except ModuleNotFoundError:
+    PaddleOCR = None
 
-ocr = PaddleOCR(
-    lang="ch",
-    use_angle_cls=False
-)
+
+_ocr = None
 
 
 def _append_text(texts: list[str], value) -> None:
@@ -50,8 +53,17 @@ def _dedupe_keep_order(texts: list[str]) -> list[str]:
 
 
 def recognize_text(image_path):
+    global _ocr
+
+    if PaddleOCR is None:
+        return []
+
+    if _ocr is None:
+        # Lazy init to avoid heavy model loading at import time (tests/CI).
+        _ocr = PaddleOCR(lang="ch", use_angle_cls=False)
+
     try:
-        result = ocr.ocr(image_path)
+        result = _ocr.ocr(image_path)
     except Exception:
         return []
 
