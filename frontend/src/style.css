@@ -232,25 +232,25 @@ select {
   border-radius: 12px;
 }
 
-table {
+.table-wrap table {
   border-collapse: collapse;
   width: 100%;
   min-width: 680px;
 }
 
-th,
-td {
+.table-wrap th,
+.table-wrap td {
   padding: 9px 10px;
   border-bottom: 1px solid var(--line);
   text-align: left;
   font-size: 0.9rem;
 }
 
-thead th {
+.table-wrap thead th {
   background: #efe3cf;
 }
 
-tbody tr:hover {
+.table-wrap tbody tr:hover {
   background: #f8f3ea;
 }
 
@@ -261,6 +261,23 @@ tbody tr:hover {
 .empty {
   text-align: center;
   color: var(--muted);
+}
+
+.receipt-daterange-popper {
+  max-width: calc(100vw - 32px);
+}
+
+.receipt-daterange-popper .el-date-range-picker,
+.receipt-daterange-popper .el-picker-panel,
+.receipt-daterange-popper .el-picker-panel__body-wrapper,
+.receipt-daterange-popper .el-picker-panel__body,
+.receipt-daterange-popper .el-picker-panel__content {
+  max-width: 100%;
+}
+
+.receipt-daterange-popper .el-date-range-picker__content {
+  max-width: 100%;
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
@@ -281,5 +298,17 @@ tbody tr:hover {
 
   .panel-head {
     flex-wrap: wrap;
+  }
+
+  .receipt-daterange-popper .el-date-range-picker__content {
+    flex-wrap: wrap;
+  }
+
+  .receipt-daterange-popper .el-date-range-picker__cell {
+    width: 100%;
+  }
+
+  .receipt-daterange-popper .el-date-range-picker {
+    width: auto;
   }
 }

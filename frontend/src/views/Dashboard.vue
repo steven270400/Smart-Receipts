@@ -6,6 +6,7 @@ import CategoryPieChart from '../components/dashboard/CategoryPieChart.vue'
 import MonthlyTrendChart from '../components/dashboard/MonthlyTrendChart.vue'
 import TopExpenseList from '../components/dashboard/TopExpenseList.vue'
 import LogPanel from '../components/dashboard/LogPanel.vue'
+import { toDateString, toDateTimeString } from '../utils/date'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
 
@@ -50,11 +51,6 @@ function formatNow() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
 }
 
-function formatDateTime(value) {
-  const pad = (v) => String(v).padStart(2, '0')
-  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`
-}
-
 function monthKey(value) {
   const pad = (v) => String(v).padStart(2, '0')
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}`
@@ -86,7 +82,11 @@ async function request(url) {
   if (!response.ok) {
     throw new Error(`Request failed with status ${response.status}`)
   }
-  return response.json()
+  const payload = await response.json()
+  if (payload.code !== 0) {
+    throw new Error(payload.message || 'Request failed')
+  }
+  return payload.data
 }
 
 async function fetchReceipts(params) {
@@ -140,7 +140,7 @@ function buildMonthlyTrend(last3MonthsList) {
   }
 
   for (const item of last3MonthsList) {
-    const time = parseDate(item.transaction_time || item.date)
+    const time = parseDate(item.transaction_time)
     if (!time) {
       continue
     }
@@ -166,7 +166,7 @@ function buildTopExpenses(last6MonthsList) {
     merchant: item.merchant,
     amount: Number(item.amount || 0),
     category: item.category || '其他',
-    date: String(item.transaction_time || item.date || '').slice(0, 10)
+    date: toDateString(item.transaction_time)
   }))
 
   state.summary.maxExpenseAmount = state.topExpenses[0]?.amount || 0
@@ -190,21 +190,21 @@ async function loadDashboardData() {
     const payload = await fetchReceipts({
       page: 1,
       size: 1000,
-      start_time: formatDateTime(start6m),
-      end_time: formatDateTime(now)
+      start_time: toDateTimeString(start6m),
+      end_time: toDateTimeString(now)
     })
 
-    const allRows = payload.data || []
+    const allRows = payload.list || []
 
-    const rowsWithTime = allRows.filter((item) => parseDate(item.transaction_time || item.date))
+    const rowsWithTime = allRows.filter((item) => parseDate(item.transaction_time))
 
     const last30Rows = rowsWithTime.filter((item) => {
-      const t = parseDate(item.transaction_time || item.date)
+      const t = parseDate(item.transaction_time)
       return t && t >= start30
     })
 
     const last3mRows = rowsWithTime.filter((item) => {
-      const t = parseDate(item.transaction_time || item.date)
+      const t = parseDate(item.transaction_time)
       return t && t >= start3m
     })
 
@@ -259,7 +259,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="dashboard-page">
+  <div v-loading="loading" class="dashboard-page">
     <el-card shadow="never" class="dashboard-head">
       <div class="head-wrap">
         <div>

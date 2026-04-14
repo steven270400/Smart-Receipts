@@ -149,7 +149,7 @@ def _seed_dimensions():
 
 
 def _normalize_transaction_time(data: dict) -> datetime:
-    value = data.get("transaction_time") or data.get("date")
+    value = data.get("transaction_time")
     if isinstance(value, datetime):
         return value
 
@@ -239,7 +239,6 @@ def get_receipts():
                     r.merchant,
                     CAST(r.amount AS DOUBLE) AS amount,
                     c.name AS category,
-                    DATE_FORMAT(r.transaction_time, '%Y-%m-%d %H:%i:%s') AS date,
                     DATE_FORMAT(r.transaction_time, '%Y-%m-%d %H:%i:%s') AS transaction_time,
                     pm.name AS payment_method,
                     r.notes,
@@ -377,6 +376,7 @@ def list_receipts(
     page: int = 1,
     size: int = 1000,
     merchant: str | None = None,
+    keyword: str | None = None,
     category_id: int | None = None,
     payment_method_id: int | None = None,
     start_time: str | None = None,
@@ -392,6 +392,22 @@ def list_receipts(
     if merchant:
         where.append("r.merchant LIKE %s")
         params.append(f"%{merchant.strip()}%")
+    if keyword:
+        kw = keyword.strip()
+        if kw:
+            like_kw = f"%{kw}%"
+            or_parts = ["r.merchant LIKE %s", "c.name LIKE %s", "pm.name LIKE %s"]
+            or_params = [like_kw, like_kw, like_kw]
+            try:
+                day = datetime.strptime(kw, "%Y-%m-%d").date()
+            except ValueError:
+                day = None
+            if day:
+                # Match the whole day. This is robust even when the DB doesn't store microseconds.
+                or_parts.append("DATE(r.transaction_time) = %s")
+                or_params.append(day.strftime("%Y-%m-%d"))
+            where.append("(" + " OR ".join(or_parts) + ")")
+            params.extend(or_params)
     if category_id is not None:
         where.append("r.category_id = %s")
         params.append(int(category_id))
@@ -426,7 +442,6 @@ def list_receipts(
                     r.merchant,
                     CAST(r.amount AS DOUBLE) AS amount,
                     DATE_FORMAT(r.transaction_time, '%%Y-%%m-%%d %%H:%%i:%%s') AS transaction_time,
-                    DATE_FORMAT(r.transaction_time, '%%Y-%%m-%%d %%H:%%i:%%s') AS date,
                     r.category_id,
                     c.name AS category,
                     r.payment_method_id,
@@ -463,7 +478,6 @@ def get_receipt_by_id(receipt_id: int, include_deleted: bool = False):
                     r.merchant,
                     CAST(r.amount AS DOUBLE) AS amount,
                     DATE_FORMAT(r.transaction_time, '%%Y-%%m-%%d %%H:%%i:%%s') AS transaction_time,
-                    DATE_FORMAT(r.transaction_time, '%%Y-%%m-%%d %%H:%%i:%%s') AS date,
                     r.category_id,
                     c.name AS category,
                     r.payment_method_id,
@@ -493,7 +507,7 @@ def create_manual_receipt(payload: dict):
     except (TypeError, ValueError):
         raise ValueError("金额格式错误")
 
-    transaction_input = payload.get("transaction_time") or payload.get("date")
+    transaction_input = payload.get("transaction_time")
     transaction_time = _parse_transaction_time(transaction_input)
 
     category_id = payload.get("category_id")
@@ -545,7 +559,7 @@ def update_receipt_by_id(receipt_id: int, payload: dict):
     except (TypeError, ValueError):
         raise ValueError("金额格式错误")
 
-    transaction_input = payload.get("transaction_time") or payload.get("date")
+    transaction_input = payload.get("transaction_time")
     transaction_time = _parse_transaction_time(transaction_input)
 
     category_id = payload.get("category_id")
