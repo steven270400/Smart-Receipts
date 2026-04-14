@@ -97,10 +97,13 @@ function onReset() {
       <el-form-item :label="text.dateRangeLabel">
         <el-date-picker
           :model-value="filters.dateRange"
-          type="datetimerange"
+          type="daterange"
           :start-placeholder="text.startDatePlaceholder"
           :end-placeholder="text.endDatePlaceholder"
-          value-format="YYYY-MM-DD HH:mm:ss"
+          range-separator="至"
+          popper-class="receipt-daterange-popper"
+          format="YYYY-MM-DD"
+          value-format="YYYY-MM-DD"
           @update:model-value="(value) => patchFilters({ dateRange: value || [] })"
         />
       </el-form-item>

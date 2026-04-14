@@ -28,7 +28,7 @@ const EMPTY_FORM = {
   merchant: '',
   amount: '',
   category: '',
-  date: '',
+  transaction_time: '',
   payment_method: ''
 }
 
@@ -85,7 +85,7 @@ const rules = {
     }
   ],
   category: [{ required: true, message: text.requiredCategory, trigger: 'change' }],
-  date: [{ required: true, message: text.requiredDate, trigger: 'change' }],
+  transaction_time: [{ required: true, message: text.requiredDate, trigger: 'change' }],
   payment_method: [{ required: true, message: text.requiredPayment, trigger: 'change' }]
 }
 
@@ -101,7 +101,7 @@ watch(
     form.merchant = source.merchant || ''
     form.amount = source.amount ?? ''
     form.category = source.category || ''
-    form.date = source.date || ''
+    form.transaction_time = source.transaction_time || ''
     form.payment_method = source.payment_method || ''
 
     setTimeout(() => {
@@ -126,7 +126,7 @@ function submit() {
         merchant: form.merchant.trim(),
         amount: Number(form.amount),
         category: form.category,
-        date: form.date,
+        transaction_time: form.transaction_time,
         payment_method: form.payment_method
       })
     } finally {
@@ -153,11 +153,12 @@ function submit() {
         </el-select>
       </el-form-item>
 
-      <el-form-item :label="text.date" prop="date">
+      <el-form-item :label="text.date" prop="transaction_time">
         <el-date-picker
-          v-model="form.date"
+          v-model="form.transaction_time"
           type="datetime"
           :placeholder="text.datePlaceholder"
+          format="YYYY-MM-DD HH:mm:ss"
           value-format="YYYY-MM-DD HH:mm:ss"
           style="width: 100%"
         />

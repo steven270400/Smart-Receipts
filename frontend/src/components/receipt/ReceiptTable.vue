@@ -72,7 +72,7 @@ function onSizeChange(size) {
           <el-tag :type="tagType(row.category)">{{ row.category }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="date" :label="text.date" min-width="180" />
+      <el-table-column prop="transaction_time" :label="text.date" min-width="180" />
       <el-table-column prop="payment_method" :label="text.paymentMethod" width="120" />
       <el-table-column :label="text.actions" width="180" fixed="right">
         <template #default="{ row }">

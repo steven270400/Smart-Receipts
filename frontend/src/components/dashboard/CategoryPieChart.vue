@@ -91,7 +91,7 @@ onBeforeUnmount(() => {
 <template>
   <el-card shadow="never" class="chart-card">
     <template #header>
-      <div class="card-title">Category Share (Last 30 Days)</div>
+      <div class="card-title">近期消费分类分析(Last 30 Days)</div>
     </template>
     <div ref="chartRef" class="chart"></div>
   </el-card>

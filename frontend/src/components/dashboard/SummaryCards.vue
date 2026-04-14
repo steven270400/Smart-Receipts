@@ -36,8 +36,10 @@ function toCurrency(amount) {
     <el-col :xs="24" :sm="12" :lg="6">
       <el-card shadow="hover" class="summary-card">
         <template #header>{{ labels.topCategory }}</template>
-        <div class="value">{{ summary.topCategory || '-' }}</div>
-        <div class="sub">{{ toCurrency(summary.topCategoryAmount) }}</div>
+        <div class="top-category-row">
+          <div class="top-category-name">{{ summary.topCategory || '-' }}</div>
+          <div class="top-category-amount">{{ toCurrency(summary.topCategoryAmount) }}</div>
+        </div>
       </el-card>
     </el-col>
     <el-col :xs="24" :sm="12" :lg="6">
@@ -75,5 +77,25 @@ function toCurrency(amount) {
   margin-top: 6px;
   color: #77829a;
   font-size: 13px;
+}
+
+.top-category-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.top-category-name {
+  font-size: 20px;
+  line-height: 1.3;
+  color: #1f2d3d;
+  font-weight: 700;
+}
+
+.top-category-amount {
+  color: #77829a;
+  font-size: 13px;
+  white-space: nowrap;
 }
 </style>

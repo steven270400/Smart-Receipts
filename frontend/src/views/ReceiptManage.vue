@@ -7,10 +7,11 @@ import ReceiptTable from '../components/receipt/ReceiptTable.vue'
 import ReceiptFormDialog from '../components/receipt/ReceiptFormDialog.vue'
 import { fetchReceipts, createReceipt, updateReceipt, deleteReceipt } from '../api/receipt'
 import { CATEGORY_OPTIONS, PAYMENT_METHOD_OPTIONS } from '../mock/receipts'
+import { toTimestamp } from '../utils/date'
 
 const text = {
   pageTitle: '\u8d26\u5355\u7ba1\u7406',
-  pageSubtitle: '\u652f\u6301\u7b5b\u9009\u3001\u5206\u9875\u3001\u65b0\u589e\u3001\u7f16\u8f91\u3001\u5220\u9664\uff08Mock \u6570\u636e\uff09',
+  pageSubtitle: '\u652f\u6301\u7b5b\u9009\u3001\u5206\u9875\u3001\u65b0\u589e\u3001\u7f16\u8f91\u3001\u5220\u9664\uff08\u6570\u636e\uff09',
   backHome: '\u8fd4\u56de\u9996\u9875',
   addReceipt: '\u65b0\u589e\u8d26\u5355',
   createSuccess: '\u65b0\u589e\u8d26\u5355\u6210\u529f',
@@ -42,17 +43,14 @@ const dialogState = reactive({
   currentRecord: null
 })
 
-function toTimestamp(value) {
-  if (!value) {
-    return 0
-  }
-  return new Date(String(value).replace(/-/g, '/')).getTime()
-}
-
 const filteredList = computed(() => {
   const keyword = appliedFilters.value.merchant.trim().toLowerCase()
-  const start = appliedFilters.value.dateRange?.[0] ? toTimestamp(appliedFilters.value.dateRange[0]) : 0
-  const end = appliedFilters.value.dateRange?.[1] ? toTimestamp(appliedFilters.value.dateRange[1]) : 0
+  const start = appliedFilters.value.dateRange?.[0]
+    ? toTimestamp(`${appliedFilters.value.dateRange[0]} 00:00:00`)
+    : 0
+  const end = appliedFilters.value.dateRange?.[1]
+    ? toTimestamp(`${appliedFilters.value.dateRange[1]} 23:59:59`)
+    : 0
 
   return receipts.value.filter((item) => {
     if (keyword && !String(item.merchant || '').toLowerCase().includes(keyword)) {
@@ -71,7 +69,7 @@ const filteredList = computed(() => {
     }
 
     if (start || end) {
-      const current = toTimestamp(item.date)
+      const current = toTimestamp(item.transaction_time)
       if (start && current < start) {
         return false
       }
@@ -93,8 +91,10 @@ const pagedList = computed(() => {
 async function loadData() {
   loading.value = true
   try {
-    const res = await fetchReceipts()
-    receipts.value = res.data || []
+    const res = await fetchReceipts({ page: 1, size: 1000 })
+    receipts.value = res.list || []
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载账单失败')
   } finally {
     loading.value = false
   }
@@ -123,29 +123,36 @@ function openEditDialog(row) {
 }
 
 async function handleDialogSubmit(formData) {
-  if (dialogState.mode === 'create') {
-    await createReceipt(formData)
-    ElMessage.success(text.createSuccess)
-  } else {
-    await updateReceipt(dialogState.currentRecord.id, formData)
-    ElMessage.success(text.updateSuccess)
+  try {
+    if (dialogState.mode === 'create') {
+      await createReceipt(formData)
+      ElMessage.success(text.createSuccess)
+    } else {
+      await updateReceipt(dialogState.currentRecord.id, formData)
+      ElMessage.success(text.updateSuccess)
+    }
+    dialogState.visible = false
+    await loadData()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '提交失败')
   }
-
-  dialogState.visible = false
-  await loadData()
 }
 
 async function handleDelete(row) {
-  await deleteReceipt(row.id)
-  ElMessage.success(text.deleteSuccess)
+  try {
+    await deleteReceipt(row.id)
+    ElMessage.success(text.deleteSuccess)
 
-  const nextTotal = filteredList.value.length - 1
-  const maxPage = Math.max(1, Math.ceil(Math.max(nextTotal, 0) / pageState.pageSize))
-  if (pageState.currentPage > maxPage) {
-    pageState.currentPage = maxPage
+    const nextTotal = filteredList.value.length - 1
+    const maxPage = Math.max(1, Math.ceil(Math.max(nextTotal, 0) / pageState.pageSize))
+    if (pageState.currentPage > maxPage) {
+      pageState.currentPage = maxPage
+    }
+
+    await loadData()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '删除失败')
   }
-
-  await loadData()
 }
 
 function handlePageChange(page) {

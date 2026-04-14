@@ -29,11 +29,19 @@ async function request(url, options = {}) {
   }
 
   if (!response.ok) {
-    const message = payload?.detail || `Request failed with status ${response.status}`
+    const message = payload?.message || payload?.detail || `Request failed with status ${response.status}`
     throw new Error(message)
   }
 
-  return payload
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid response payload')
+  }
+
+  if (payload.code !== 0) {
+    throw new Error(payload.message || 'Request failed')
+  }
+
+  return payload.data
 }
 
 // Keep signatures unchanged for existing views.
