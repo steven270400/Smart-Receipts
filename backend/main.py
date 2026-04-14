@@ -1,52 +1,22 @@
-﻿from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-import shutil
+import logging
 import os
-import time
-import uuid
-from datetime import datetime
 
-from backend.ocr_service import recognize_text
-from backend.extract_service import extract_receipt_info
-from backend.db_service import init_db, save_receipt, get_receipts, get_statistics
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from backend.core.error_handlers import register_error_handlers
+from backend.core.response import success_response
+from backend.db_service import init_db
+from backend.routers.ocr_router import router as ocr_router
+from backend.routers.receipt_router import router as receipt_router
+from backend.routers.stats_router import router as stats_router
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 app = FastAPI()
-init_db()
 
-UPLOAD_DIR = "uploads"
-
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR)
-
-
-def build_safe_upload_path(original_filename: str) -> tuple[str, str]:
-    # Never trust client-provided filename for storage path.
-    base_name = os.path.basename(original_filename or "")
-    _, ext = os.path.splitext(base_name)
-    ext = ext.lower()
-
-    if not ext or len(ext) > 10 or not ext.replace(".", "", 1).isalnum():
-        ext = ".bin"
-
-    saved_filename = f"{uuid.uuid4().hex}{ext}"
-    file_path = os.path.join(UPLOAD_DIR, saved_filename)
-    return file_path, saved_filename
-
-
-def validate_receipt_info(info: dict) -> tuple[bool, str]:
-    amount = info.get("amount")
-    date_value = info.get("date")
-
-    if amount is None or not date_value:
-        return False, "missing_amount_or_date"
-
-    try:
-        float(amount)
-        datetime.strptime(str(date_value), "%Y-%m-%d")
-    except (TypeError, ValueError):
-        return False, "invalid_amount_or_date"
-
-    return True, "ok"
+if os.getenv("SKIP_DB_INIT", "").strip().lower() not in {"1", "true", "yes", "on"}:
+    init_db()
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,51 +26,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+register_error_handlers(app)
+
+
 @app.get("/test")
 def test():
-    return {"message": "ok"}
-
-@app.get("/receipts")
-def list_receipts():
-    data = get_receipts()
-
-    return {
-        "data": data
-    }
-
-@app.get("/statistics")
-def statistic():
-    stats = get_statistics()
-    return {
-        "data": stats
-    }
+    return success_response(data={"status": "ok"})
 
 
-@app.post("/ocr")
-async def ocr_image(file: UploadFile = File(...)):
-
-    file_path, saved_filename = build_safe_upload_path(file.filename)
-
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    start = time.time()
-    texts = recognize_text(file_path)
-    end = time.time()
-
-    print("OCR elapsed:", end - start)
-
-    info = extract_receipt_info(texts)
-    should_save, save_reason = validate_receipt_info(info)
-
-    if should_save:
-        save_receipt(info)
-
-    return {
-        "filename": file.filename,
-        "saved_filename": saved_filename,
-        "ocr_result": texts,
-        "extracted_info": info,
-        "saved": should_save,
-        "save_reason": save_reason
-    }
+app.include_router(receipt_router)
+app.include_router(stats_router)
+app.include_router(ocr_router)

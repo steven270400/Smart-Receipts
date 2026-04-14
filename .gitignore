@@ -24,3 +24,6 @@ receipt.db
 # Temp / logs
 *.log
 frontend_new/
+
+# Obsidian (local notes)
+SmartReceipts/.obsidian/
