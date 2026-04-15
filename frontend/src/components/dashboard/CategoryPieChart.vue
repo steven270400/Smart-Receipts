@@ -19,7 +19,13 @@ function buildOption() {
     color: ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de'],
     tooltip: {
       trigger: 'item',
-      formatter: '{b}<br/>Amount: CNY {c}<br/>Rate: {d}%'
+      formatter(params) {
+        const amount = Number(params.value || 0).toLocaleString('zh-CN', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        })
+        return `${params.name}<br/>金额: CNY ${amount}<br/>占比: ${params.percent}%`
+      }
     },
     legend: {
       bottom: 0,
@@ -27,7 +33,7 @@ function buildOption() {
     },
     series: [
       {
-        name: 'Category Spend',
+        name: '分类消费',
         type: 'pie',
         radius: ['40%', '70%'],
         itemStyle: {
@@ -40,7 +46,7 @@ function buildOption() {
         },
         data: props.data.map((item) => ({
           name: item.category,
-          value: item.amount
+          value: Number(Number(item.amount || 0).toFixed(2))
         }))
       }
     ]
@@ -91,7 +97,7 @@ onBeforeUnmount(() => {
 <template>
   <el-card shadow="never" class="chart-card">
     <template #header>
-      <div class="card-title">近期消费分类分析(Last 30 Days)</div>
+      <div class="card-title">近期消费分类分析（近30天）</div>
     </template>
     <div ref="chartRef" class="chart"></div>
   </el-card>
@@ -112,8 +118,3 @@ onBeforeUnmount(() => {
   height: 360px;
 }
 </style>
-
-
-
-
-

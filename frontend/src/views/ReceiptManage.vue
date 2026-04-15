@@ -179,6 +179,7 @@ onMounted(async () => {
         </div>
         <div class="head-actions">
           <el-button @click="router.push('/dashboard')">{{ text.backHome }}</el-button>
+          <el-button @click="router.push('/ocr')">前往 OCR 控制台</el-button>
           <el-button type="primary" @click="openCreateDialog">{{ text.addReceipt }}</el-button>
         </div>
       </div>

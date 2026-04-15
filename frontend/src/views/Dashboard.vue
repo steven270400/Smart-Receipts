@@ -18,7 +18,7 @@ const pageText = {
   logInitDone: 'Dashboard 页面初始化完成',
   logSummaryLoaded: '已加载近30天概览数据',
   logCategoryLoaded: '已加载近30天分类饼图数据',
-  logTrendLoaded: '已加载近3个月趋势数据',
+  logTrendLoaded: '已加载近6个月趋势数据',
   logTopLoaded: '已加载近6个月最大消费记录数据',
   logRefresh: '用户触发数据刷新',
   logCleared: '日志已清空',
@@ -54,6 +54,18 @@ function formatNow() {
 function monthKey(value) {
   const pad = (v) => String(v).padStart(2, '0')
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}`
+}
+
+function monthLabel(value) {
+  const [year, month] = String(value || '').split('-')
+  if (!year || !month) {
+    return String(value || '')
+  }
+  return `${year}年${month}月`
+}
+
+function round2(value) {
+  return Number(Number(value || 0).toFixed(2))
 }
 
 function parseDate(value) {
@@ -112,22 +124,22 @@ function buildSummaryAndCategory(last30List) {
   }
 
   const categoryData = Object.entries(categoryMap)
-    .map(([category, amount]) => ({ category, amount }))
+    .map(([category, amount]) => ({ category, amount: round2(amount) }))
     .sort((a, b) => b.amount - a.amount)
 
   const topCategory = categoryData[0] || { category: '', amount: 0 }
 
-  state.summary.last30DaysTotal = total
+  state.summary.last30DaysTotal = round2(total)
   state.summary.last30DaysCount = last30List.length
   state.summary.topCategory = topCategory.category
-  state.summary.topCategoryAmount = topCategory.amount
+  state.summary.topCategoryAmount = round2(topCategory.amount)
   state.categoryData = categoryData
 }
 
-function buildMonthlyTrend(last3MonthsList) {
+function buildMonthlyTrend(last6MonthsList) {
   const now = new Date()
   const months = []
-  for (let i = 2; i >= 0; i -= 1) {
+  for (let i = 5; i >= 0; i -= 1) {
     const d = new Date(now)
     d.setDate(1)
     d.setMonth(d.getMonth() - i)
@@ -139,7 +151,7 @@ function buildMonthlyTrend(last3MonthsList) {
     trendMap[month] = 0
   }
 
-  for (const item of last3MonthsList) {
+  for (const item of last6MonthsList) {
     const time = parseDate(item.transaction_time)
     if (!time) {
       continue
@@ -152,7 +164,8 @@ function buildMonthlyTrend(last3MonthsList) {
 
   state.monthlyTrendData = months.map((month) => ({
     month,
-    amount: Number(trendMap[month].toFixed(2))
+    monthLabel: monthLabel(month),
+    amount: round2(trendMap[month])
   }))
 }
 
@@ -164,12 +177,12 @@ function buildTopExpenses(last6MonthsList) {
   state.topExpenses = sorted.map((item) => ({
     id: item.id,
     merchant: item.merchant,
-    amount: Number(item.amount || 0),
+    amount: round2(item.amount),
     category: item.category || '其他',
     date: toDateString(item.transaction_time)
   }))
 
-  state.summary.maxExpenseAmount = state.topExpenses[0]?.amount || 0
+  state.summary.maxExpenseAmount = round2(state.topExpenses[0]?.amount || 0)
 }
 
 async function loadDashboardData() {
@@ -181,8 +194,8 @@ async function loadDashboardData() {
     const start30 = new Date(now)
     start30.setDate(start30.getDate() - 30)
 
-    const start3m = new Date(now)
-    start3m.setMonth(start3m.getMonth() - 3)
+    const start6mTrend = new Date(now)
+    start6mTrend.setMonth(start6mTrend.getMonth() - 6)
 
     const start6m = new Date(now)
     start6m.setMonth(start6m.getMonth() - 6)
@@ -203,16 +216,16 @@ async function loadDashboardData() {
       return t && t >= start30
     })
 
-    const last3mRows = rowsWithTime.filter((item) => {
+    const last6mTrendRows = rowsWithTime.filter((item) => {
       const t = parseDate(item.transaction_time)
-      return t && t >= start3m
+      return t && t >= start6mTrend
     })
 
     buildSummaryAndCategory(last30Rows)
     addLog('info', pageText.logSummaryLoaded)
     addLog('info', pageText.logCategoryLoaded)
 
-    buildMonthlyTrend(last3mRows)
+    buildMonthlyTrend(last6mTrendRows)
     addLog('info', pageText.logTrendLoaded)
 
     buildTopExpenses(rowsWithTime)

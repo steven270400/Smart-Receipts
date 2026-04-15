@@ -21,7 +21,11 @@ function buildOption() {
       trigger: 'axis',
       formatter(params) {
         const item = params[0]
-        return `${item.axisValue}<br/>Amount: CNY ${item.data}`
+        const amount = Number(item.data || 0).toLocaleString('zh-CN', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        })
+        return `${item.axisValue}<br/>金额: CNY ${amount}`
       }
     },
     grid: {
@@ -34,19 +38,19 @@ function buildOption() {
     xAxis: {
       type: 'category',
       boundaryGap: false,
-      data: props.data.map((item) => item.month)
+      data: props.data.map((item) => item.monthLabel || item.month)
     },
     yAxis: {
       type: 'value',
-      name: 'Amount'
+      name: '金额'
     },
     series: [
       {
-        name: 'Monthly Spend',
+        name: '月度消费',
         type: 'line',
         smooth: true,
         symbolSize: 8,
-        data: props.data.map((item) => item.amount),
+        data: props.data.map((item) => Number(Number(item.amount || 0).toFixed(2))),
         areaStyle: {
           opacity: 0.15
         }
@@ -99,7 +103,7 @@ onBeforeUnmount(() => {
 <template>
   <el-card shadow="never" class="chart-card">
     <template #header>
-      <div class="card-title">3-Month Trend</div>
+      <div class="card-title">近6个月消费趋势</div>
     </template>
     <div ref="chartRef" class="chart"></div>
   </el-card>
@@ -120,8 +124,3 @@ onBeforeUnmount(() => {
   height: 360px;
 }
 </style>
-
-
-
-
-

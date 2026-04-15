@@ -274,7 +274,7 @@ onMounted(async () => {
       <div class="hero-row">
         <p class="subtitle">上传票据图片，查看识别与抽取结果，并核对入库数据。</p>
         <div class="hero-actions">
-          <el-button @click="router.push('/dashboard')">返回 Dashboard</el-button>
+          <el-button @click="router.push('/dashboard')">返回 Dashboard首页</el-button>
           <el-button type="primary" @click="router.push('/receipts')">账单管理</el-button>
         </div>
       </div>
