@@ -2,26 +2,26 @@
 import { computed, reactive, ref, watch } from 'vue'
 
 const text = {
-  createTitle: '\u65b0\u589e\u8d26\u5355',
-  editTitle: '\u7f16\u8f91\u8d26\u5355',
-  merchant: '\u5546\u5bb6\u540d\u79f0',
-  merchantPlaceholder: '\u8bf7\u8f93\u5165\u5546\u5bb6\u540d\u79f0',
-  amount: '\u91d1\u989d',
-  amountPlaceholder: '\u8bf7\u8f93\u5165\u91d1\u989d',
-  category: '\u5206\u7c7b',
-  categoryPlaceholder: '\u8bf7\u9009\u62e9\u5206\u7c7b',
-  date: '\u65e5\u671f',
-  datePlaceholder: '\u8bf7\u9009\u62e9\u65e5\u671f',
-  paymentMethod: '\u652f\u4ed8\u65b9\u5f0f',
-  paymentPlaceholder: '\u8bf7\u9009\u62e9\u652f\u4ed8\u65b9\u5f0f',
-  cancel: '\u53d6\u6d88',
-  confirm: '\u786e\u5b9a',
-  requiredMerchant: '\u8bf7\u8f93\u5165\u5546\u5bb6\u540d\u79f0',
-  requiredAmount: '\u8bf7\u8f93\u5165\u91d1\u989d',
-  invalidAmount: '\u91d1\u989d\u5fc5\u987b\u4e3a\u6709\u6548\u6570\u5b57',
-  requiredCategory: '\u8bf7\u9009\u62e9\u5206\u7c7b',
-  requiredDate: '\u8bf7\u9009\u62e9\u65e5\u671f',
-  requiredPayment: '\u8bf7\u9009\u62e9\u652f\u4ed8\u65b9\u5f0f'
+  createTitle: '新增账单',
+  editTitle: '编辑账单',
+  merchant: '商家',
+  merchantPlaceholder: '请输入商家名称',
+  amount: '金额',
+  amountPlaceholder: '请输入金额',
+  category: '分类',
+  categoryPlaceholder: '请选择分类',
+  date: '交易时间',
+  datePlaceholder: '请选择交易时间',
+  paymentMethod: '支付方式',
+  paymentPlaceholder: '请选择支付方式',
+  cancel: '取消',
+  confirm: '确定',
+  requiredMerchant: '请输入商家名称',
+  requiredAmount: '请输入金额',
+  invalidAmount: '请输入合法金额',
+  requiredCategory: '请选择分类',
+  requiredDate: '请选择交易时间',
+  requiredPayment: '请选择支付方式'
 }
 
 const EMPTY_FORM = {
@@ -137,8 +137,8 @@ function submit() {
 </script>
 
 <template>
-  <el-dialog :model-value="visible" :title="title" width="560px" destroy-on-close @close="closeDialog">
-    <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
+  <el-dialog :model-value="visible" :title="title" width="620px" destroy-on-close @close="closeDialog">
+    <el-form ref="formRef" :model="form" :rules="rules" label-width="110px" class="dialog-form">
       <el-form-item :label="text.merchant" prop="merchant">
         <el-input v-model="form.merchant" :placeholder="text.merchantPlaceholder" />
       </el-form-item>
@@ -181,3 +181,9 @@ function submit() {
     </template>
   </el-dialog>
 </template>
+
+<style scoped>
+.dialog-form :deep(.el-form-item) {
+  margin-bottom: 18px;
+}
+</style>

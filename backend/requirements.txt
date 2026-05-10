@@ -1,7 +1,8 @@
 fastapi
 uvicorn
-paddlepaddle == 2.6.2
-paddleocr
+paddlepaddle-gpu==2.6.2
+paddleocr==2.7.3
+numpy==1.24.4
 pillow
 python-multipart
 requests

@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts/dist/echarts.esm.mjs'
 
@@ -95,9 +95,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <el-card shadow="never" class="chart-card">
+  <el-card shadow="never" class="chart-card sr-card">
     <template #header>
-      <div class="card-title">近期消费分类分析（近30天）</div>
+      <div class="card-title">分类占比（近30天）</div>
     </template>
     <div ref="chartRef" class="chart"></div>
   </el-card>

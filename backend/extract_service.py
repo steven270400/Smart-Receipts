@@ -3,7 +3,10 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
+from backend.text_fixups import repair_glued_qty_amount
+
 AMOUNT_PATTERN = re.compile(r"(?<!\d)-?\d{1,9}(?:\.\d{1,2})?(?!\d)")
+MULTIPLIER_TRAILING_PREFIX_PATTERN = re.compile(r"\d+\.\d{1,2}\s*[*xX×]\s*\d{1,4}\s*$")
 
 DATE_PATTERNS_WITH_YEAR = [
     re.compile(r"(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})(?:\s*(\d{1,2}):(\d{2}))?"),
@@ -31,7 +34,7 @@ PHONE_CONTEXT_HINTS = [
     "电话",
     "转",
 ]
-MERCHANT_HINTS = ["公司", "有限公司", "商户", "店", "超市", "集团", "mart", "store", "shop", "ltd", "inc"]
+MERCHANT_HINTS = ["公司", "有限公司", "商户", "店", "超市", "集团", "快餐", "馆", "mart", "store", "shop", "ltd", "inc"]
 
 PAYMENT_KEYWORDS = [
     ("支付宝", "支付宝"),
@@ -58,6 +61,7 @@ def _normalize_texts(texts) -> list[str]:
         if text is None:
             continue
         clean = str(text).strip()
+        clean = repair_glued_qty_amount(clean)
         # OCR may glue date and time together, e.g. "04-0621:46" -> "04-06 21:46".
         clean = re.sub(
             r"(?<!\d)((?:20\d{2}[-/.]\d{1,2}[-/.]\d{1,2})|(?:\d{1,2}[-/]\d{1,2})|(?:\d{1,2}月\d{1,2}[日号]?))(?=\d{1,2}:\d{2}\b)",
@@ -154,6 +158,16 @@ def _infer_numeric_kind(line: str, raw: str, start: int, end: int) -> str:
     return "amount_candidate"
 
 
+def _is_multiplier_trailing_amount_candidate(line: str, raw: str, start: int) -> bool:
+    if "." not in raw:
+        return False
+    prefix = line[:start]
+    if not MULTIPLIER_TRAILING_PREFIX_PATTERN.search(prefix):
+        return False
+    lowered = line.lower()
+    return any(hint in lowered for hint in ORIGINAL_PRICE_HINTS)
+
+
 def _score_amount_candidate(line: str, raw: str, start: int, end: int) -> int:
     lowered = line.lower()
     context = lowered[max(0, start - 12) : min(len(lowered), end + 12)]
@@ -186,6 +200,18 @@ def _score_amount_candidate(line: str, raw: str, start: int, end: int) -> int:
         except ValueError:
             pass
 
+    if "." in raw:
+        tail = line[end : min(len(line), end + 8)]
+        if tail and tail[0] in {"*", "x", "X", "×"}:
+            score -= 4
+
+        prefix = line[max(0, start - 12) : start]
+        if re.search(r"[*xX×]\s*\d{1,4}\s*$", prefix):
+            score += 5
+
+    if _is_multiplier_trailing_amount_candidate(line, raw, start):
+        score += 12
+
     if raw.startswith("-"):
         score += 2
     if "." in raw:
@@ -216,6 +242,10 @@ def _collect_numeric_candidates(clean_texts: list[str], *, top_k: int) -> list[d
                     "parsed_value": parsed_value,
                     "kind_hint": kind,
                     "rule_score": int(score),
+                    "is_multiplier_trailing_amount": bool(
+                        kind == "amount_candidate"
+                        and _is_multiplier_trailing_amount_candidate(text, raw, start)
+                    ),
                 }
             )
 
@@ -372,10 +402,14 @@ def build_candidates(clean_texts: list[str], *, top_k: int = 5) -> dict:
                 "matched_hints": matched[:8],
                 "kind_hint": "amount_candidate",
                 "numeric_id": numeric.get("id"),
+                "is_multiplier_trailing_amount": bool(numeric.get("is_multiplier_trailing_amount")),
             }
         )
 
-    amount_items.sort(key=lambda it: (it["rule_score"], float(it["parsed_value"])), reverse=True)
+    amount_items.sort(
+        key=lambda it: (bool(it.get("is_multiplier_trailing_amount")), it["rule_score"], float(it["parsed_value"])),
+        reverse=True,
+    )
     amount_items = amount_items[:top_k]
     for idx, item in enumerate(amount_items):
         item["id"] = f"a{idx}"
@@ -537,6 +571,20 @@ def _get_candidate(candidates: dict, field: str, candidate_id: str | None) -> di
     return None
 
 
+def _find_multiplier_trailing_amount(candidates: dict) -> dict | None:
+    amount_items = candidates.get("amount") or []
+    selected = None
+    for item in amount_items:
+        if not item.get("is_multiplier_trailing_amount"):
+            continue
+        if selected is None:
+            selected = item
+            continue
+        if int(item.get("rule_score", 0)) > int(selected.get("rule_score", 0)):
+            selected = item
+    return selected
+
+
 def _validate_amount(value) -> float | None:
     if value is None:
         return None
@@ -614,20 +662,43 @@ def extract_receipt_info_with_meta(texts) -> tuple[dict, dict]:
     except Exception as exc:
         meta["error"] = str(exc)
         meta["latency_ms_total"] = int((time.time() - started) * 1000)
+        meta["selected_amount_id"] = None
+        meta["match_status"] = "failed_fallback_auto"
+        meta["match_failure_reason"] = "llm_error"
         return baseline, meta
 
     meta["latency_ms_total"] = int((time.time() - started) * 1000)
     final = dict(baseline)
+    selected_amount_id = selection.get("amount_id") if isinstance(selection.get("amount_id"), str) else None
+    meta["selected_amount_id"] = selected_amount_id
 
     merchant = _map_candidate_value(candidates, "merchant", selection.get("merchant_id"))
     if isinstance(merchant, str) and merchant.strip():
         final["merchant"] = merchant
 
     excluded_numeric_ids = _collect_excluded_numeric_ids(selection)
-    if _is_amount_selection_allowed(candidates, selection.get("amount_id"), excluded_numeric_ids):
+    amount_selection_allowed = _is_amount_selection_allowed(candidates, selection.get("amount_id"), excluded_numeric_ids)
+    llm_amount_applied = False
+    if amount_selection_allowed:
         amount = _validate_amount(_map_candidate_value(candidates, "amount", selection.get("amount_id")))
         if amount is not None:
             final["amount"] = amount
+            llm_amount_applied = True
+
+    selected_amount_candidate = _get_candidate(candidates, "amount", selection.get("amount_id"))
+    trailing_amount_candidate = _find_multiplier_trailing_amount(candidates)
+    amount_overridden = False
+    if trailing_amount_candidate and (
+        not selected_amount_candidate
+        or not bool(selected_amount_candidate.get("is_multiplier_trailing_amount"))
+    ):
+        override_amount = _validate_amount(trailing_amount_candidate.get("parsed_value"))
+        if override_amount is not None:
+            final["amount"] = override_amount
+            meta["amount_override_reason"] = "multiplier_trailing_amount_priority"
+            if isinstance(trailing_amount_candidate.get("id"), str):
+                meta["amount_override_candidate_id"] = trailing_amount_candidate.get("id")
+            amount_overridden = True
 
     date_value = _validate_date(_map_candidate_value(candidates, "date", selection.get("date_id")))
     if date_value is not None:
@@ -640,6 +711,16 @@ def extract_receipt_info_with_meta(texts) -> tuple[dict, dict]:
     category = _map_candidate_value(candidates, "category", selection.get("category_id"))
     if isinstance(category, str) and category.strip():
         final["category"] = category
+
+    if amount_overridden:
+        meta["match_status"] = "failed_fallback_auto"
+        meta["match_failure_reason"] = "amount_overridden_to_rule_based"
+    elif not amount_selection_allowed or not llm_amount_applied:
+        meta["match_status"] = "failed_fallback_auto"
+        meta["match_failure_reason"] = "invalid_or_missing_amount_selection"
+    else:
+        meta["match_status"] = "matched"
+        meta["match_failure_reason"] = None
 
     if _should_store_candidates():
         meta["candidates"] = candidates

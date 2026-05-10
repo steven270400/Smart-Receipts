@@ -1,16 +1,16 @@
 import unittest
 
-from backend.extract_service import _now_china_naive, extract_receipt_info
+from backend.extract_service import _now_china_naive, build_candidates, extract_receipt_info
 
 
 class ExtractServiceTests(unittest.TestCase):
     def test_prefers_total_amount_hints(self):
         texts = [
-            "商品A 8.00",
-            "小计 8.00",
-            "总计 12.50",
-            "日期 2026-03-29",
-            "支付宝",
+            "item A 8.00",
+            "subtotal 8.00",
+            "total 12.50",
+            "date 2026-03-29",
+            "alipay",
         ]
         result = extract_receipt_info(texts)
         self.assertEqual(result["amount"], 12.50)
@@ -32,41 +32,48 @@ class ExtractServiceTests(unittest.TestCase):
 
     def test_prefers_deduction_over_balance_amount(self):
         texts = [
-            "支付成功",
+            "payment success",
             "扣款金额 100",
-            "余额 980.26",
-            "日期 2026-03-29",
+            "balance 980.26",
+            "date 2026-03-29",
         ]
         result = extract_receipt_info(texts)
         self.assertEqual(result["amount"], 100.0)
 
     def test_negative_amount_wins_even_with_balance_keyword(self):
         texts = [
-            "账户变动",
-            "余额 -100.00",
-            "余额 980.26",
-            "日期 2026-03-29",
+            "account change",
+            "balance -100.00",
+            "balance 980.26",
+            "date 2026-03-29",
         ]
         result = extract_receipt_info(texts)
         self.assertEqual(result["amount"], 100.0)
 
     def test_phone_tail_number_is_not_amount(self):
         texts = [
-            "顾客号码：手机尾号3124",
-            "虚拟号码：17895011878转0687",
-            "9.3折，原价13.00*1",
+            "customer no: phone tail 3124",
+            "virtual no: 17895011878 transfer 0687",
+            "9.3 discount, original price 13.00*1",
             "12.06",
         ]
         result = extract_receipt_info(texts)
         self.assertEqual(result["amount"], 12.06)
 
     def test_prefers_paid_amount_over_original_price(self):
-        texts = ["9.3折，原价13.00*1", "实付 12.06"]
+        texts = ["9.3 discount, original price 13.00*1", "paid 12.06"]
         result = extract_receipt_info(texts)
         self.assertEqual(result["amount"], 12.06)
 
+    def test_build_candidates_marks_multiplier_trailing_amount(self):
+        candidates = build_candidates(["原价13.00*1 12.06"], top_k=5)
+        trailing = [item for item in candidates["amount"] if item.get("is_multiplier_trailing_amount")]
+        self.assertTrue(trailing)
+        self.assertEqual(float(trailing[0]["parsed_value"]), 12.06)
+        self.assertEqual(candidates["amount"][0]["id"], trailing[0]["id"])
+
     def test_infers_recent_past_date_for_month_day_time(self):
-        texts = ["下单时间：04-06 21:46", "实付 12.06"]
+        texts = ["order time: 04-06 21:46", "paid 12.06"]
         result = extract_receipt_info(texts)
 
         now_cn = _now_china_naive()
@@ -76,7 +83,7 @@ class ExtractServiceTests(unittest.TestCase):
         self.assertEqual(result["date"], f"{expected_year}-04-06")
 
     def test_infers_recent_past_date_for_glued_month_day_time(self):
-        texts = ["单间：04-0621:46", "实付 12.06"]
+        texts = ["room: 04-0621:46", "paid 12.06"]
         result = extract_receipt_info(texts)
 
         now_cn = _now_china_naive()

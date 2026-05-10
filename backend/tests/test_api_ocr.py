@@ -37,6 +37,12 @@ class OcrApiTests(unittest.TestCase):
             },
             "saved": True,
             "save_reason": "ok",
+            "llm_meta": {
+                "selected_amount_id": "a0",
+                "match_status": "matched",
+                "match_failure_reason": None,
+                "amount_override_reason": None,
+            },
             "ocr_meta": {"ocr_elapsed_ms": 10, "llm_enabled": True, "llm_fallback": False},
         }
 
@@ -53,6 +59,8 @@ class OcrApiTests(unittest.TestCase):
         self.assertIn("data", body)
         self.assertIn("extracted_info", body["data"])
         self.assertIn("transaction_time", body["data"]["extracted_info"])
+        self.assertIn("llm_meta", body["data"])
+        self.assertEqual(body["data"]["llm_meta"]["match_status"], "matched")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from backend.db_service import init_db
 from backend.routers.ocr_router import router as ocr_router
 from backend.routers.receipt_router import router as receipt_router
 from backend.routers.stats_router import router as stats_router
+from backend.routers.system_router import router as system_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -37,3 +38,4 @@ def test():
 app.include_router(receipt_router)
 app.include_router(stats_router)
 app.include_router(ocr_router)
+app.include_router(system_router)

@@ -1,10 +1,9 @@
 try:
-    # Optional dependency. Keep the backend importable even when PaddleOCR
-    # isn't installed (e.g., CI/unit tests).
     from paddleocr import PaddleOCR  # type: ignore
 except ModuleNotFoundError:
     PaddleOCR = None
 
+from backend.text_fixups import repair_glued_qty_amount
 
 _ocr = None
 
@@ -32,8 +31,11 @@ def _walk_ocr_result(node, texts: list[str]) -> None:
         return
 
     if isinstance(node, (list, tuple)):
-        # PaddleOCR v2 style often includes (text, score) pairs.
-        if len(node) == 2 and isinstance(node[0], str) and isinstance(node[1], (int, float)):
+        if (
+            len(node) == 2
+            and isinstance(node[0], str)
+            and isinstance(node[1], (int, float))
+        ):
             _append_text(texts, node[0])
             return
 
@@ -44,27 +46,43 @@ def _walk_ocr_result(node, texts: list[str]) -> None:
 def _dedupe_keep_order(texts: list[str]) -> list[str]:
     seen = set()
     deduped = []
+
     for text in texts:
         if text in seen:
             continue
         seen.add(text)
         deduped.append(text)
+
     return deduped
 
 
-def recognize_text(image_path):
+def _normalize_ocr_texts(texts: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for text in texts:
+        repaired = repair_glued_qty_amount(text).strip()
+        if repaired:
+            normalized.append(repaired)
+    return normalized
+
+
+def recognize_text(image_path: str) -> list[str]:
     global _ocr
 
     if PaddleOCR is None:
         return []
 
     if _ocr is None:
-        # Lazy init to avoid heavy model loading at import time (tests/CI).
-        _ocr = PaddleOCR(lang="ch", use_angle_cls=False)
+        _ocr = PaddleOCR(
+            lang="ch",
+            use_angle_cls=False,
+            use_gpu=False,   # 先强制 CPU，恢复稳定
+            show_log=False,  # 关闭 DEBUG 日志
+        )
 
     try:
-        result = _ocr.ocr(image_path)
-    except Exception:
+        result = _ocr.ocr(image_path, cls=False)
+    except Exception as e:
+        print("OCR GPU/Runtime error:", repr(e))
         return []
 
     if not result:
@@ -72,4 +90,4 @@ def recognize_text(image_path):
 
     texts: list[str] = []
     _walk_ocr_result(result, texts)
-    return _dedupe_keep_order(texts)
+    return _dedupe_keep_order(_normalize_ocr_texts(texts))

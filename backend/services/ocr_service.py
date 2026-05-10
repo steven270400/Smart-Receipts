@@ -74,6 +74,10 @@ def process_ocr_upload(upload_file) -> dict:
     should_save, save_reason = validate_receipt_info(info)
     llm_fallback = bool(llm_meta.get("error"))
     llm_enabled = bool(llm_meta.get("llm_enabled"))
+    match_status = llm_meta.get("match_status")
+    match_failure_reason = llm_meta.get("match_failure_reason")
+    selected_amount_id = llm_meta.get("selected_amount_id")
+    final_amount = info.get("amount")
 
     if should_save:
         try:
@@ -95,6 +99,20 @@ def process_ocr_upload(upload_file) -> dict:
         llm_enabled,
         llm_fallback,
     )
+    if llm_enabled:
+        if match_status == "matched":
+            logger.info(
+                "llm_match=matched amount_id=%s final_amount=%s",
+                selected_amount_id,
+                final_amount,
+            )
+        else:
+            logger.info(
+                "llm_match=failed_fallback_auto reason=%s amount_id=%s final_amount=%s action=转至自动匹配",
+                match_failure_reason or "unknown",
+                selected_amount_id,
+                final_amount,
+            )
 
     return {
         "filename": upload_file.filename,

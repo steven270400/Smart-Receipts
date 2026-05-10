@@ -1,6 +1,9 @@
-<script setup>
+﻿<script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import PageContainer from '../components/PageContainer.vue'
+import { addOperationLog } from '../stores/operationLog'
+import { notifyReceiptsChanged } from '../stores/receiptEvents'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
 
@@ -8,7 +11,6 @@ const state = reactive({
   loadingUpload: false,
   loadingStats: false,
   loadingReceipts: false,
-  errorMessage: '',
   ocrResult: [],
   extractedInfo: null,
   saved: null,
@@ -28,21 +30,17 @@ const state = reactive({
   }
 })
 
-const router = useRouter()
 const selectedFile = ref(null)
-
 const categoryIdMap = ref({})
 const categoryIdPrefetching = ref(false)
 
 const categoryOptions = computed(() => {
   const set = new Set()
-
   for (const name of Object.keys(state.stats?.category_stats || {})) {
     if (name) {
       set.add(String(name))
     }
   }
-
   for (const row of state.receipts || []) {
     if (row?.category) {
       set.add(String(row.category))
@@ -51,17 +49,37 @@ const categoryOptions = computed(() => {
   return ['all', ...Array.from(set)]
 })
 
-const filteredReceipts = computed(() => {
-  return state.receipts.filter((item) => {
-    const categoryOk =
-      state.filters.category === 'all' || item.category === state.filters.category
-
-    if (!categoryOk) {
-      return false
-    }
-    return true
-  })
+const selectedCategoryId = computed(() => {
+  const selected = state.filters.category
+  if (!selected || selected === 'all') {
+    return null
+  }
+  const mapped = categoryIdMap.value?.[selected]
+  if (mapped) {
+    return Number(mapped)
+  }
+  const row = (state.receipts || []).find((item) => item?.category === selected)
+  const id = row?.category_id
+  return id ? Number(id) : null
 })
+
+async function request(url, options = {}) {
+  const response = await fetch(url, options)
+  let payload = null
+  try {
+    payload = await response.json()
+  } catch {
+    payload = null
+  }
+
+  if (!response.ok) {
+    throw new Error(payload?.message || `请求失败，状态码 ${response.status}`)
+  }
+  if (!payload || payload.code !== 0) {
+    throw new Error(payload?.message || '请求失败')
+  }
+  return payload.data
+}
 
 function saveReasonLabel(reason) {
   const labels = {
@@ -72,58 +90,14 @@ function saveReasonLabel(reason) {
   return labels[reason] || reason || ''
 }
 
-const selectedCategoryId = computed(() => {
-  const selected = state.filters.category
-  if (!selected || selected === 'all') {
-    return null
-  }
-
-  const mapped = categoryIdMap.value?.[selected]
-  if (mapped) {
-    return Number(mapped)
-  }
-
-  const row = (state.receipts || []).find((item) => item?.category === selected)
-  const id = row?.category_id
-  return id ? Number(id) : null
-})
-
-const totalPages = computed(() => {
-  const total = Number(state.receiptTotal || 0)
-  const size = Number(state.receiptPageSize || 10)
-  return Math.max(1, Math.ceil(total / size))
-})
-
-async function request(url, options = {}) {
-  const response = await fetch(url, options)
-  let payload = null
-
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
-
-  if (!response.ok) {
-    throw new Error(payload?.message || `Request failed with status ${response.status}`)
-  }
-
-  if (!payload || payload.code !== 0) {
-    throw new Error(payload?.message || 'Request failed')
-  }
-
-  return payload.data
-}
-
-function onFileChange(event) {
-  selectedFile.value = event.target.files?.[0] || null
+function onUploadFileChange(uploadFile) {
+  selectedFile.value = uploadFile?.raw || null
 }
 
 async function uploadReceipt() {
-  state.errorMessage = ''
-
   if (!selectedFile.value) {
-    state.errorMessage = '请先选择一张图片。'
+    addOperationLog('warning', 'OCR 上传失败：用户未选择图片')
+    ElMessage.warning('请先选择图片')
     return
   }
 
@@ -136,15 +110,19 @@ async function uploadReceipt() {
       method: 'POST',
       body: formData
     })
-
     state.ocrResult = data.ocr_result || []
     state.extractedInfo = data.extracted_info || null
     state.saved = Boolean(data.saved)
     state.saveReason = saveReasonLabel(data.save_reason)
-
+    if (state.saved) {
+      notifyReceiptsChanged('ocr')
+    }
     await Promise.all([loadStats(), loadReceipts(1)])
+    addOperationLog('success', '用户完成 OCR 识别并刷新统计与账单列表')
+    ElMessage.success('OCR 识别完成')
   } catch (error) {
-    state.errorMessage = error instanceof Error ? error.message : '上传失败。'
+    addOperationLog('error', `OCR 上传识别失败：${error instanceof Error ? error.message : '未知错误'}`)
+    ElMessage.error(error instanceof Error ? error.message : '上传失败')
   } finally {
     state.loadingUpload = false
   }
@@ -159,8 +137,10 @@ async function loadStats() {
       total_records: 0,
       category_stats: {}
     }
+    addOperationLog('info', '用户刷新 OCR 统计概览')
   } catch (error) {
-    state.errorMessage = error instanceof Error ? error.message : '加载统计概览失败。'
+    addOperationLog('error', `加载 OCR 统计失败：${error instanceof Error ? error.message : '未知错误'}`)
+    ElMessage.error(error instanceof Error ? error.message : '加载统计失败')
   } finally {
     state.loadingStats = false
   }
@@ -179,9 +159,10 @@ async function loadReceipts(page = 1) {
     if (selectedCategoryId.value) {
       query.set('category_id', String(selectedCategoryId.value))
     }
-    const payload = await request(`${API_BASE_URL}/receipts?${query.toString()}`)
 
+    const payload = await request(`${API_BASE_URL}/receipts?${query.toString()}`)
     state.receipts = payload.list || []
+
     for (const row of state.receipts) {
       if (row?.category && row?.category_id != null) {
         categoryIdMap.value[String(row.category)] = row.category_id
@@ -189,8 +170,10 @@ async function loadReceipts(page = 1) {
     }
     state.receiptTotal = payload.pagination?.total ?? 0
     state.receiptPage = payload.pagination?.page ?? safePage
+    addOperationLog('info', `用户查看 OCR 页账单列表（第 ${state.receiptPage} 页）`)
   } catch (error) {
-    state.errorMessage = error instanceof Error ? error.message : '加载账单列表失败。'
+    addOperationLog('error', `加载 OCR 页账单失败：${error instanceof Error ? error.message : '未知错误'}`)
+    ElMessage.error(error instanceof Error ? error.message : '加载账单失败')
   } finally {
     state.loadingReceipts = false
   }
@@ -210,32 +193,24 @@ async function prefetchCategoryIdMap() {
       }
     }
   } catch {
-    // Best-effort prefetch. If this fails, selection can still fallback to current page mapping.
+    // best effort
   } finally {
     categoryIdPrefetching.value = false
   }
 }
 
-function goPrevPage() {
-  if (state.loadingReceipts || state.receiptPage <= 1) {
-    return
-  }
-  loadReceipts(state.receiptPage - 1)
-}
-
-function goNextPage() {
-  if (state.loadingReceipts || state.receiptPage >= totalPages.value) {
-    return
-  }
-  loadReceipts(state.receiptPage + 1)
+function onPageChange(page) {
+  loadReceipts(page)
 }
 
 watch(
   () => state.filters.category,
   async () => {
-    state.receiptPage = 1
-    const selected = state.filters.category
-    if (selected && selected !== 'all' && categoryIdMap.value?.[selected] == null) {
+    if (
+      state.filters.category &&
+      state.filters.category !== 'all' &&
+      categoryIdMap.value?.[state.filters.category] == null
+    ) {
       await prefetchCategoryIdMap()
     }
     loadReceipts(1)
@@ -250,7 +225,6 @@ watch(
       clearTimeout(queryDebounceTimer)
     }
     queryDebounceTimer = setTimeout(() => {
-      state.receiptPage = 1
       loadReceipts(1)
     }, 300)
   }
@@ -262,177 +236,208 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="dashboard">
-    <el-breadcrumb separator="/" class="page-breadcrumb">
-      <el-breadcrumb-item @click="router.push('/dashboard')">仪表盘</el-breadcrumb-item>
-      <el-breadcrumb-item>OCR 控制台</el-breadcrumb-item>
-    </el-breadcrumb>
+  <PageContainer
+    title="OCR 控制台"
+    subtitle="上传票据图片、查看识别结果并核对入库记录"
+  >
+    <template #actions>
+      <el-button @click="loadStats" :loading="state.loadingStats">刷新统计</el-button>
+      <el-button type="primary" @click="uploadReceipt" :loading="state.loadingUpload">
+        上传并识别
+      </el-button>
+    </template>
 
-    <header class="hero">
-      <p class="eyebrow">SmartReceipts 管理台</p>
-      <h1>票据识别与账单管理控制台</h1>
-      <div class="hero-row">
-        <p class="subtitle">上传票据图片，查看识别与抽取结果，并核对入库数据。</p>
-        <div class="hero-actions">
-          <el-button @click="router.push('/dashboard')">返回 Dashboard首页</el-button>
-          <el-button type="primary" @click="router.push('/receipts')">账单管理</el-button>
-        </div>
-      </div>
-    </header>
-
-    <p v-if="state.errorMessage" class="error">{{ state.errorMessage }}</p>
-
-    <section v-loading="state.loadingUpload" class="panel">
-      <div class="panel-head">
-        <h2>OCR 上传与解析</h2>
-        <button :disabled="state.loadingUpload" @click="uploadReceipt">
-          {{ state.loadingUpload ? '上传中...' : '上传并解析' }}
-        </button>
-      </div>
-      <div class="upload-row">
-        <input type="file" accept="image/*" @change="onFileChange" />
-      </div>
+    <el-card shadow="never" class="sr-card">
+      <template #header>
+        <div class="sr-card-header">OCR 上传与解析</div>
+      </template>
+      <el-upload
+        class="upload-block"
+        :auto-upload="false"
+        :limit="1"
+        :on-change="onUploadFileChange"
+        :show-file-list="true"
+      >
+        <template #trigger>
+          <el-button>选择图片</el-button>
+        </template>
+      </el-upload>
       <p v-if="state.saveReason" class="save-status" :class="{ ok: state.saved, bad: state.saved === false }">
         {{ state.saveReason }}
       </p>
 
-      <div class="results-grid">
-        <article>
-          <h3>OCR 识别文本</h3>
-          <pre>{{ JSON.stringify(state.ocrResult, null, 2) }}</pre>
-        </article>
-        <article>
-          <h3>抽取结果</h3>
-          <pre>{{ JSON.stringify(state.extractedInfo, null, 2) }}</pre>
-        </article>
-      </div>
-    </section>
+      <el-row :gutter="16">
+        <el-col :xs="24" :lg="12">
+          <el-card shadow="never" class="inner-card">
+            <template #header>
+              <div class="sr-card-header">OCR 原始文本</div>
+            </template>
+            <pre>{{ JSON.stringify(state.ocrResult, null, 2) }}</pre>
+          </el-card>
+        </el-col>
+        <el-col :xs="24" :lg="12">
+          <el-card shadow="never" class="inner-card">
+            <template #header>
+              <div class="sr-card-header">抽取字段</div>
+            </template>
+            <pre>{{ JSON.stringify(state.extractedInfo, null, 2) }}</pre>
+          </el-card>
+        </el-col>
+      </el-row>
+    </el-card>
 
-    <section v-loading="state.loadingStats" class="panel">
-      <div class="panel-head">
-        <h2>统计概览</h2>
-        <button :disabled="state.loadingStats" @click="loadStats">
-          {{ state.loadingStats ? '刷新中...' : '刷新' }}
-        </button>
-      </div>
-
+    <el-card shadow="never" class="sr-card" v-loading="state.loadingStats">
+      <template #header>
+        <div class="sr-card-header">统计概览</div>
+      </template>
       <div class="stats-grid">
-        <div class="stat-card">
-          <span class="label">累计金额</span>
+        <div class="metric">
+          <span>总金额</span>
           <strong>{{ Number(state.stats.total_amount || 0).toFixed(2) }}</strong>
         </div>
-        <div class="stat-card">
-          <span class="label">账单数量</span>
+        <div class="metric">
+          <span>总记录数</span>
           <strong>{{ state.stats.total_records || 0 }}</strong>
         </div>
       </div>
 
-      <h3>分类汇总</h3>
-      <ul class="category-list">
-        <li v-for="(amount, category) in state.stats.category_stats" :key="category">
-          <span>{{ category }}</span>
-          <strong>{{ Number(amount || 0).toFixed(2) }}</strong>
-        </li>
-      </ul>
-    </section>
+      <el-table
+        :data="Object.entries(state.stats.category_stats || {}).map(([category, amount]) => ({ category, amount }))"
+        stripe
+      >
+        <el-table-column prop="category" label="分类" min-width="180" />
+        <el-table-column label="金额" min-width="140" align="right">
+          <template #default="{ row }">
+            {{ Number(row.amount || 0).toFixed(2) }}
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="暂无分类汇总数据" />
+        </template>
+      </el-table>
+    </el-card>
 
-    <section v-loading="state.loadingReceipts" class="panel">
-      <div class="panel-head">
-        <h2>账单列表</h2>
-        <button :disabled="state.loadingReceipts" @click="loadReceipts(1)">
-          {{ state.loadingReceipts ? '刷新中...' : '刷新' }}
-        </button>
-      </div>
+    <el-card shadow="never" class="sr-card" v-loading="state.loadingReceipts">
+      <template #header>
+        <div class="sr-card-header">账单列表</div>
+      </template>
 
       <div class="filters">
-        <input v-model="state.filters.query" type="text" placeholder="搜索商家/日期/分类..." />
-        <select v-model="state.filters.category">
-          <option v-for="category in categoryOptions" :key="category" :value="category">
-            {{ category === 'all' ? '全部分类' : category }}
-          </option>
-        </select>
+        <el-input v-model="state.filters.query" clearable placeholder="搜索商家/日期/分类..." />
+        <el-select v-model="state.filters.category">
+          <el-option v-for="item in categoryOptions" :key="item" :value="item" :label="item === 'all' ? '全部分类' : item" />
+        </el-select>
       </div>
 
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>日期</th>
-              <th>商家</th>
-              <th>分类</th>
-              <th>支付方式</th>
-              <th class="right">金额</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in filteredReceipts" :key="row.id">
-              <td>{{ row.id }}</td>
-              <td>{{ row.transaction_time || '-' }}</td>
-              <td>{{ row.merchant || '-' }}</td>
-              <td>{{ row.category || '-' }}</td>
-              <td>{{ row.payment_method || '-' }}</td>
-              <td class="right">{{ Number(row.amount || 0).toFixed(2) }}</td>
-            </tr>
-            <tr v-if="!filteredReceipts.length">
-              <td colspan="6" class="empty">暂无账单数据</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <el-table :data="state.receipts" stripe>
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="transaction_time" label="日期" min-width="180" />
+        <el-table-column prop="merchant" label="商家" min-width="160" />
+        <el-table-column prop="category" label="分类" min-width="120" />
+        <el-table-column prop="payment_method" label="支付方式" min-width="120" />
+        <el-table-column label="金额" min-width="120" align="right">
+          <template #default="{ row }">
+            {{ Number(row.amount || 0).toFixed(2) }}
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="暂无账单数据" />
+        </template>
+      </el-table>
 
-      <div class="pager">
-        <button :disabled="state.loadingReceipts || state.receiptPage <= 1" @click="goPrevPage">
-          上一页
-        </button>
-        <span class="pager-text">第 {{ state.receiptPage }} / {{ totalPages }} 页（共 {{ state.receiptTotal }} 条）</span>
-        <button :disabled="state.loadingReceipts || state.receiptPage >= totalPages" @click="goNextPage">
-          下一页
-        </button>
+      <div class="pager-wrap">
+        <el-pagination
+          :current-page="state.receiptPage"
+          :page-size="state.receiptPageSize"
+          :total="state.receiptTotal"
+          layout="total, prev, pager, next"
+          @current-change="onPageChange"
+        />
       </div>
-    </section>
-  </div>
+    </el-card>
+  </PageContainer>
 </template>
 
 <style scoped>
-.page-breadcrumb {
+.upload-block {
   margin-bottom: 12px;
 }
 
-.hero-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.save-status {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.save-status.ok {
+  color: var(--el-color-success);
+}
+
+.save-status.bad {
+  color: var(--el-color-danger);
+}
+
+.inner-card {
+  margin-top: 8px;
+}
+
+.inner-card :deep(.el-card__body) {
+  padding-top: 0;
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.metric {
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--el-fill-color-extra-light);
+}
+
+.metric span {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.metric strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.filters {
+  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: 2fr 1fr;
   gap: 12px;
 }
 
-.hero-actions {
+.pager-wrap {
+  margin-top: 16px;
   display: flex;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.pager {
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-}
-
-.pager-text {
-  color: var(--muted);
-  font-size: 0.9rem;
 }
 
 @media (max-width: 900px) {
-  .hero-row {
-    flex-wrap: wrap;
-  }
-
-  .pager {
-    flex-wrap: wrap;
-    justify-content: flex-start;
+  .stats-grid,
+  .filters {
+    grid-template-columns: 1fr;
   }
 }
 </style>

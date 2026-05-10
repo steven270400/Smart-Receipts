@@ -1,353 +1,240 @@
 ﻿<script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import SummaryCards from '../components/dashboard/SummaryCards.vue'
-import CategoryPieChart from '../components/dashboard/CategoryPieChart.vue'
-import MonthlyTrendChart from '../components/dashboard/MonthlyTrendChart.vue'
-import TopExpenseList from '../components/dashboard/TopExpenseList.vue'
+import PageContainer from '../components/PageContainer.vue'
 import LogPanel from '../components/dashboard/LogPanel.vue'
-import { toDateString, toDateTimeString } from '../utils/date'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
-
-const pageText = {
-  title: '智能票据识别与消费管理系统',
-  subtitle: 'Dashboard 首页',
-  goOcr: '前往 OCR 控制台',
-  goReceiptManage: '前往账单管理',
-  logInitDone: 'Dashboard 页面初始化完成',
-  logSummaryLoaded: '已加载近30天概览数据',
-  logCategoryLoaded: '已加载近30天分类饼图数据',
-  logTrendLoaded: '已加载近6个月趋势数据',
-  logTopLoaded: '已加载近6个月最大消费记录数据',
-  logRefresh: '用户触发数据刷新',
-  logCleared: '日志已清空',
-  logPieRendered: '分类饼图渲染完成',
-  logLineRendered: '月趋势折线图渲染完成',
-  logLoadError: 'Dashboard 数据加载失败'
-}
+import { useAnalyticsData } from '../composables/useAnalyticsData'
+import { addOperationLog, clearOperationLogs, useOperationLogStore } from '../stores/operationLog'
+import { useReceiptEventStore } from '../stores/receiptEvents'
 
 const router = useRouter()
 const loading = ref(false)
-let nextLogId = 1000
 
-const state = reactive({
-  summary: {
-    last30DaysTotal: 0,
-    last30DaysCount: 0,
-    topCategory: '',
-    topCategoryAmount: 0,
-    maxExpenseAmount: 0
+const { state, load } = useAnalyticsData()
+const logStore = useOperationLogStore()
+const receiptEvents = useReceiptEventStore()
+const initialized = ref(false)
+const logs = computed(() => logStore.logs)
+
+const overviewCards = [
+  { key: 'totalReceipts', label: '总账单数', suffix: '条' },
+  { key: 'todayReceipts', label: '今日识别数（代理）', suffix: '条' },
+  { key: 'categoryCount', label: '分类总数', suffix: '个' },
+  { key: 'paymentMethodCount', label: '支付方式总数', suffix: '个' }
+]
+
+const quickLinks = [
+  { label: '前往 OCR 控制台', path: '/ocr', type: 'primary' },
+  { label: '前往账单管理', path: '/receipts', type: '' },
+  { label: '查看消费统计', path: '/analytics/overview', type: '' },
+  { label: '查看分类分析', path: '/analytics/category', type: '' }
+]
+
+const features = [
+  {
+    title: 'OCR 票据识别',
+    desc: '支持票据图片上传、文本识别与结构化字段抽取。'
   },
-  categoryData: [],
-  monthlyTrendData: [],
-  topExpenses: [],
-  logs: []
-})
-
-function formatNow() {
-  const now = new Date()
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
-}
-
-function monthKey(value) {
-  const pad = (v) => String(v).padStart(2, '0')
-  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}`
-}
-
-function monthLabel(value) {
-  const [year, month] = String(value || '').split('-')
-  if (!year || !month) {
-    return String(value || '')
+  {
+    title: '账单管理',
+    desc: '支持账单筛选、分页、新增、编辑、删除等基础管理能力。'
+  },
+  {
+    title: '消费统计',
+    desc: '提供消费总览、趋势分析、近期消费与 Top 消费洞察。'
+  },
+  {
+    title: '分类分析',
+    desc: '聚焦消费结构，展示分类占比、分类金额排行与笔数统计。'
+  },
+  {
+    title: '系统管理',
+    desc: '提供分类与支付方式的只读聚合管理视图。'
   }
-  return `${year}年${month}月`
-}
+]
 
-function round2(value) {
-  return Number(Number(value || 0).toFixed(2))
-}
-
-function parseDate(value) {
-  if (!value) {
-    return null
-  }
-  const text = String(value).replace(/-/g, '/')
-  const date = new Date(text)
-  if (Number.isNaN(date.getTime())) {
-    return null
-  }
-  return date
-}
-
-function addLog(level, message) {
-  state.logs.unshift({
-    id: nextLogId++,
-    time: formatNow(),
-    level,
-    message
-  })
-}
-
-async function request(url) {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`)
-  }
-  const payload = await response.json()
-  if (payload.code !== 0) {
-    throw new Error(payload.message || 'Request failed')
-  }
-  return payload.data
-}
-
-async function fetchReceipts(params) {
-  const query = new URLSearchParams()
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === '') {
-      return
-    }
-    query.append(key, String(value))
-  })
-
-  const suffix = query.toString() ? `?${query.toString()}` : ''
-  return request(`${API_BASE_URL}/receipts${suffix}`)
-}
-
-function buildSummaryAndCategory(last30List) {
-  const total = last30List.reduce((acc, item) => acc + Number(item.amount || 0), 0)
-  const categoryMap = {}
-
-  for (const item of last30List) {
-    const key = item.category || '其他'
-    categoryMap[key] = (categoryMap[key] || 0) + Number(item.amount || 0)
-  }
-
-  const categoryData = Object.entries(categoryMap)
-    .map(([category, amount]) => ({ category, amount: round2(amount) }))
-    .sort((a, b) => b.amount - a.amount)
-
-  const topCategory = categoryData[0] || { category: '', amount: 0 }
-
-  state.summary.last30DaysTotal = round2(total)
-  state.summary.last30DaysCount = last30List.length
-  state.summary.topCategory = topCategory.category
-  state.summary.topCategoryAmount = round2(topCategory.amount)
-  state.categoryData = categoryData
-}
-
-function buildMonthlyTrend(last6MonthsList) {
-  const now = new Date()
-  const months = []
-  for (let i = 5; i >= 0; i -= 1) {
-    const d = new Date(now)
-    d.setDate(1)
-    d.setMonth(d.getMonth() - i)
-    months.push(monthKey(d))
-  }
-
-  const trendMap = {}
-  for (const month of months) {
-    trendMap[month] = 0
-  }
-
-  for (const item of last6MonthsList) {
-    const time = parseDate(item.transaction_time)
-    if (!time) {
-      continue
-    }
-    const key = monthKey(time)
-    if (Object.prototype.hasOwnProperty.call(trendMap, key)) {
-      trendMap[key] += Number(item.amount || 0)
-    }
-  }
-
-  state.monthlyTrendData = months.map((month) => ({
-    month,
-    monthLabel: monthLabel(month),
-    amount: round2(trendMap[month])
-  }))
-}
-
-function buildTopExpenses(last6MonthsList) {
-  const sorted = [...last6MonthsList]
-    .sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0))
-    .slice(0, 5)
-
-  state.topExpenses = sorted.map((item) => ({
-    id: item.id,
-    merchant: item.merchant,
-    amount: round2(item.amount),
-    category: item.category || '其他',
-    date: toDateString(item.transaction_time)
-  }))
-
-  state.summary.maxExpenseAmount = round2(state.topExpenses[0]?.amount || 0)
-}
-
-async function loadDashboardData() {
+async function initialize() {
   loading.value = true
-
   try {
-    const now = new Date()
-
-    const start30 = new Date(now)
-    start30.setDate(start30.getDate() - 30)
-
-    const start6mTrend = new Date(now)
-    start6mTrend.setMonth(start6mTrend.getMonth() - 6)
-
-    const start6m = new Date(now)
-    start6m.setMonth(start6m.getMonth() - 6)
-
-    const payload = await fetchReceipts({
-      page: 1,
-      size: 1000,
-      start_time: toDateTimeString(start6m),
-      end_time: toDateTimeString(now)
-    })
-
-    const allRows = payload.list || []
-
-    const rowsWithTime = allRows.filter((item) => parseDate(item.transaction_time))
-
-    const last30Rows = rowsWithTime.filter((item) => {
-      const t = parseDate(item.transaction_time)
-      return t && t >= start30
-    })
-
-    const last6mTrendRows = rowsWithTime.filter((item) => {
-      const t = parseDate(item.transaction_time)
-      return t && t >= start6mTrend
-    })
-
-    buildSummaryAndCategory(last30Rows)
-    addLog('info', pageText.logSummaryLoaded)
-    addLog('info', pageText.logCategoryLoaded)
-
-    buildMonthlyTrend(last6mTrendRows)
-    addLog('info', pageText.logTrendLoaded)
-
-    buildTopExpenses(rowsWithTime)
-    addLog('info', pageText.logTopLoaded)
-
-    addLog('success', pageText.logInitDone)
+    await load()
+    addOperationLog('success', '系统首页数据加载完成')
   } catch (error) {
-    addLog('error', `${pageText.logLoadError}: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    addOperationLog('error', `系统首页数据加载失败: ${error instanceof Error ? error.message : '未知错误'}`)
   } finally {
     loading.value = false
   }
 }
 
-async function initialize() {
-  state.logs = []
-  await loadDashboardData()
-}
-
 async function onRefresh() {
-  addLog('warning', pageText.logRefresh)
-  await loadDashboardData()
+  addOperationLog('warning', '用户触发首页数据刷新')
+  await initialize()
 }
 
 function onClearLogs() {
-  state.logs = []
-  addLog('success', pageText.logCleared)
+  clearOperationLogs()
+  addOperationLog('success', '日志已清空')
 }
 
-function onCategoryChartRendered() {
-  if (state.categoryData.length > 0) {
-    addLog('success', pageText.logPieRendered)
+function onQuickLinkClick(link) {
+  addOperationLog('info', `用户点击快捷入口：${link.label}`)
+  router.push(link.path)
+}
+
+watch(
+  () => receiptEvents.version,
+  async () => {
+    if (!initialized.value) {
+      return
+    }
+    await initialize()
   }
-}
+)
 
-function onTrendChartRendered() {
-  if (state.monthlyTrendData.length > 0) {
-    addLog('success', pageText.logLineRendered)
-  }
-}
-
-onMounted(() => {
-  initialize()
+onMounted(async () => {
+  await initialize()
+  initialized.value = true
 })
 </script>
 
 <template>
-  <div v-loading="loading" class="dashboard-page">
-    <el-card shadow="never" class="dashboard-head">
-      <div class="head-wrap">
-        <div>
-          <div class="head-title">{{ pageText.title }}</div>
-          <div class="head-subtitle">{{ pageText.subtitle }}</div>
-        </div>
-        <div class="head-actions">
-          <el-button @click="router.push('/ocr')">{{ pageText.goOcr }}</el-button>
-          <el-button type="primary" @click="router.push('/receipts')">{{ pageText.goReceiptManage }}</el-button>
-        </div>
+  <PageContainer title="系统首页" subtitle="系统入口与运行状态概览">
+    <el-card shadow="never" class="sr-card welcome-card">
+      <div class="welcome-title">欢迎使用 SmartReceipts 管理系统</div>
+      <div class="welcome-desc">
+        在一个页面集中查看系统运行状态，并快速进入 OCR、账单与分析模块。
       </div>
     </el-card>
 
-    <SummaryCards :summary="state.summary" />
-
-    <el-row :gutter="16" class="main-row">
-      <el-col :xs="24" :lg="12">
-        <CategoryPieChart :data="state.categoryData" @rendered="onCategoryChartRendered" />
-      </el-col>
-      <el-col :xs="24" :lg="12">
-        <MonthlyTrendChart :data="state.monthlyTrendData" @rendered="onTrendChartRendered" />
+    <el-row :gutter="16">
+      <el-col v-for="item in overviewCards" :key="item.key" :xs="24" :sm="12" :lg="6">
+        <el-card shadow="never" class="sr-card overview-card" v-loading="loading">
+          <div class="overview-label">{{ item.label }}</div>
+          <div class="overview-value">{{ state.overview[item.key] || 0 }} {{ item.suffix }}</div>
+        </el-card>
       </el-col>
     </el-row>
 
-    <el-row :gutter="16" class="main-row">
-      <el-col :xs="24" :lg="14">
-        <TopExpenseList :list="state.topExpenses" />
+    <el-row :gutter="16">
+      <el-col :xs="24" :lg="6">
+        <el-card shadow="never" class="sr-card card-fill">
+          <template #header>
+            <div class="sr-card-header">快捷入口</div>
+          </template>
+          <div class="quick-grid">
+            <el-button
+              v-for="link in quickLinks"
+              :key="link.path"
+              :type="link.type"
+              class="quick-link-btn"
+              @click="onQuickLinkClick(link)"
+            >
+              {{ link.label }}
+            </el-button>
+          </div>
+        </el-card>
       </el-col>
-      <el-col :xs="24" :lg="10">
-        <LogPanel :logs="state.logs" :loading="loading" @refresh="onRefresh" @clear="onClearLogs" />
+
+      <el-col :xs="24" :lg="18">
+        <el-card shadow="never" class="sr-card card-fill">
+          <template #header>
+            <div class="sr-card-header">系统功能介绍</div>
+          </template>
+          <div class="feature-grid">
+            <div v-for="item in features" :key="item.title" class="feature-item">
+              <div class="feature-title">{{ item.title }}</div>
+              <div class="feature-desc">{{ item.desc }}</div>
+            </div>
+          </div>
+        </el-card>
       </el-col>
     </el-row>
-  </div>
+
+    <LogPanel :logs="logs" :loading="loading" @refresh="onRefresh" @clear="onClearLogs" />
+  </PageContainer>
 </template>
 
 <style scoped>
-.dashboard-page {
-  padding: 0 0 18px;
+.welcome-card {
+  border: none;
+  background: linear-gradient(135deg, #ecf5ff 0%, #f7faff 100%);
 }
 
-.dashboard-head {
-  margin-bottom: 16px;
-  border: 1px solid #e6e8ef;
+.welcome-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
 }
 
-.head-wrap {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+.welcome-desc {
+  margin-top: 8px;
+  color: var(--el-text-color-secondary);
 }
 
-.head-actions {
-  display: flex;
+.overview-card {
+  height: 100%;
+}
+
+.overview-label {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.overview-value {
+  margin-top: 8px;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+
+.card-fill {
+  height: 100%;
+}
+
+.quick-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  max-width: 260px;
+}
+
+.quick-link-btn {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 40px;
+}
+
+.feature-grid {
+  display: grid;
   gap: 10px;
 }
 
-.head-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: #1f2d3d;
+.feature-item {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: flex-start;
+  column-gap: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 11px 12px;
+  background: #fafcff;
 }
 
-.head-subtitle {
-  margin-top: 4px;
-  color: #73809a;
+.feature-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
 }
 
-.main-row {
-  margin-bottom: 16px;
+.feature-desc {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
 }
 
-@media (max-width: 900px) {
-  .head-wrap {
-    flex-wrap: wrap;
+@media (max-width: 768px) {
+  .feature-item {
+    grid-template-columns: 1fr;
+    row-gap: 4px;
   }
 }
 </style>

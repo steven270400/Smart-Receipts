@@ -20,7 +20,7 @@ function toCurrency(amount) {
 </script>
 
 <template>
-  <el-card shadow="never" class="list-card">
+  <el-card shadow="never" class="list-card sr-card">
     <template #header>
       <div class="card-title">{{ labels.title }}</div>
     </template>

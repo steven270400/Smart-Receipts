@@ -31,7 +31,7 @@ const levelTagType = {
 </script>
 
 <template>
-  <el-card shadow="never" class="log-card">
+  <el-card shadow="never" class="log-card sr-card">
     <template #header>
       <div class="log-header">
         <div class="card-title">{{ labels.title }}</div>

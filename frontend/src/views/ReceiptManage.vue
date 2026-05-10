@@ -1,27 +1,29 @@
 ﻿<script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import PageContainer from '../components/PageContainer.vue'
 import ReceiptFilter from '../components/receipt/ReceiptFilter.vue'
 import ReceiptTable from '../components/receipt/ReceiptTable.vue'
 import ReceiptFormDialog from '../components/receipt/ReceiptFormDialog.vue'
 import { fetchReceipts, createReceipt, updateReceipt, deleteReceipt } from '../api/receipt'
-import { CATEGORY_OPTIONS, PAYMENT_METHOD_OPTIONS } from '../mock/receipts'
+import { fetchCategories, fetchPaymentMethods } from '../api/system'
 import { toTimestamp } from '../utils/date'
+import { addOperationLog } from '../stores/operationLog'
+import { notifyReceiptsChanged } from '../stores/receiptEvents'
 
 const text = {
-  pageTitle: '\u8d26\u5355\u7ba1\u7406',
-  pageSubtitle: '\u652f\u6301\u7b5b\u9009\u3001\u5206\u9875\u3001\u65b0\u589e\u3001\u7f16\u8f91\u3001\u5220\u9664\uff08\u6570\u636e\uff09',
-  backHome: '\u8fd4\u56de\u9996\u9875',
-  addReceipt: '\u65b0\u589e\u8d26\u5355',
-  createSuccess: '\u65b0\u589e\u8d26\u5355\u6210\u529f',
-  updateSuccess: '\u7f16\u8f91\u8d26\u5355\u6210\u529f',
-  deleteSuccess: '\u5220\u9664\u8d26\u5355\u6210\u529f'
+  pageTitle: '账单管理',
+  pageSubtitle: '支持筛选、分页、新增、编辑与删除账单记录',
+  addReceipt: '新增账单',
+  createSuccess: '账单新增成功',
+  updateSuccess: '账单更新成功',
+  deleteSuccess: '账单删除成功'
 }
 
-const router = useRouter()
 const loading = ref(false)
 const receipts = ref([])
+const categoryOptions = ref([])
+const paymentMethodOptions = ref([])
 
 const pageState = reactive({
   currentPage: 1,
@@ -93,47 +95,69 @@ async function loadData() {
   try {
     const res = await fetchReceipts({ page: 1, size: 1000 })
     receipts.value = res.list || []
+    addOperationLog('info', '用户加载账单管理列表数据')
   } catch (error) {
+    addOperationLog('error', `加载账单管理列表失败：${error instanceof Error ? error.message : '未知错误'}`)
     ElMessage.error(error instanceof Error ? error.message : '加载账单失败')
   } finally {
     loading.value = false
   }
 }
 
+async function loadDimensions() {
+  try {
+    const [categories, paymentMethods] = await Promise.all([fetchCategories(), fetchPaymentMethods()])
+    categoryOptions.value = (categories || []).map((item) => item.name).filter(Boolean)
+    paymentMethodOptions.value = (paymentMethods || []).map((item) => item.name).filter(Boolean)
+  } catch (error) {
+    addOperationLog('error', `加载分类/支付方式选项失败：${error instanceof Error ? error.message : '未知错误'}`)
+    ElMessage.error(error instanceof Error ? error.message : '加载分类/支付方式选项失败')
+  }
+}
+
 function handleSearch(model) {
   appliedFilters.value = { ...model }
   pageState.currentPage = 1
+  addOperationLog('info', '用户执行账单筛选查询')
 }
 
 function handleReset(model) {
   appliedFilters.value = { ...model }
   pageState.currentPage = 1
+  addOperationLog('info', '用户重置账单筛选条件')
 }
 
 function openCreateDialog() {
   dialogState.mode = 'create'
   dialogState.currentRecord = null
   dialogState.visible = true
+  addOperationLog('info', '用户打开新增账单弹窗')
 }
 
 function openEditDialog(row) {
   dialogState.mode = 'edit'
   dialogState.currentRecord = { ...row }
   dialogState.visible = true
+  addOperationLog('info', `用户打开编辑账单弹窗（ID: ${row?.id || '-'}）`)
 }
 
 async function handleDialogSubmit(formData) {
   try {
     if (dialogState.mode === 'create') {
       await createReceipt(formData)
+      notifyReceiptsChanged('manual-create')
+      addOperationLog('success', '用户新增账单成功')
       ElMessage.success(text.createSuccess)
     } else {
       await updateReceipt(dialogState.currentRecord.id, formData)
+      notifyReceiptsChanged('manual-update')
+      addOperationLog('success', `用户编辑账单成功（ID: ${dialogState.currentRecord.id}）`)
       ElMessage.success(text.updateSuccess)
     }
     dialogState.visible = false
-    await loadData()
+    await Promise.all([loadData(), loadDimensions()])
   } catch (error) {
+    addOperationLog('error', `账单提交失败：${error instanceof Error ? error.message : '未知错误'}`)
     ElMessage.error(error instanceof Error ? error.message : '提交失败')
   }
 }
@@ -141,6 +165,8 @@ async function handleDialogSubmit(formData) {
 async function handleDelete(row) {
   try {
     await deleteReceipt(row.id)
+    notifyReceiptsChanged('manual-delete')
+    addOperationLog('success', `用户删除账单成功（ID: ${row.id}）`)
     ElMessage.success(text.deleteSuccess)
 
     const nextTotal = filteredList.value.length - 1
@@ -151,44 +177,37 @@ async function handleDelete(row) {
 
     await loadData()
   } catch (error) {
+    addOperationLog('error', `删除账单失败：${error instanceof Error ? error.message : '未知错误'}`)
     ElMessage.error(error instanceof Error ? error.message : '删除失败')
   }
 }
 
 function handlePageChange(page) {
   pageState.currentPage = page
+  addOperationLog('info', `用户切换账单页码至第 ${page} 页`)
 }
 
 function handlePageSizeChange(size) {
   pageState.pageSize = size
   pageState.currentPage = 1
+  addOperationLog('info', `用户修改账单每页条数为 ${size}`)
 }
 
 onMounted(async () => {
-  await loadData()
+  await Promise.all([loadData(), loadDimensions()])
 })
 </script>
 
 <template>
-  <div class="receipt-manage-page">
-    <el-card shadow="never" class="page-head">
-      <div class="head-wrap">
-        <div>
-          <div class="head-title">{{ text.pageTitle }}</div>
-          <div class="head-subtitle">{{ text.pageSubtitle }}</div>
-        </div>
-        <div class="head-actions">
-          <el-button @click="router.push('/dashboard')">{{ text.backHome }}</el-button>
-          <el-button @click="router.push('/ocr')">前往 OCR 控制台</el-button>
-          <el-button type="primary" @click="openCreateDialog">{{ text.addReceipt }}</el-button>
-        </div>
-      </div>
-    </el-card>
+  <PageContainer :title="text.pageTitle" :subtitle="text.pageSubtitle">
+    <template #actions>
+      <el-button type="primary" @click="openCreateDialog">{{ text.addReceipt }}</el-button>
+    </template>
 
     <ReceiptFilter
       v-model:filters="filters"
-      :categories="CATEGORY_OPTIONS"
-      :payment-methods="PAYMENT_METHOD_OPTIONS"
+      :categories="categoryOptions"
+      :payment-methods="paymentMethodOptions"
       :loading="loading"
       @search="handleSearch"
       @reset="handleReset"
@@ -210,49 +229,9 @@ onMounted(async () => {
       v-model:visible="dialogState.visible"
       :mode="dialogState.mode"
       :initial-data="dialogState.currentRecord"
-      :categories="CATEGORY_OPTIONS"
-      :payment-methods="PAYMENT_METHOD_OPTIONS"
+      :categories="categoryOptions"
+      :payment-methods="paymentMethodOptions"
       @submit="handleDialogSubmit"
     />
-  </div>
+  </PageContainer>
 </template>
-
-<style scoped>
-.receipt-manage-page {
-  padding: 0 0 18px;
-}
-
-.page-head {
-  margin-bottom: 16px;
-  border: 1px solid #e6e8ef;
-}
-
-.head-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.head-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: #1f2d3d;
-}
-
-.head-subtitle {
-  margin-top: 4px;
-  color: #73809a;
-}
-
-.head-actions {
-  display: flex;
-  gap: 10px;
-}
-
-@media (max-width: 900px) {
-  .head-wrap {
-    flex-wrap: wrap;
-  }
-}
-</style>

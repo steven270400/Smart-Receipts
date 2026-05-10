@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pymysql
 from pymysql.cursors import DictCursor
-from pymysql.err import OperationalError
+from pymysql.err import IntegrityError, OperationalError
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
 DB_PORT = int(os.getenv("DB_PORT", "3306"))
@@ -18,6 +18,8 @@ DEFAULT_PAYMENT_METHOD = "其他"
 
 DEFAULT_CATEGORIES = ["餐饮", "交通", "生活缴费", "购物", "其他"]
 DEFAULT_PAYMENT_METHODS = ["支付宝", "微信", "余额", "银行卡", "现金", "其他"]
+
+MAX_DIMENSION_NAME_LENGTH = 100
 
 
 @contextmanager
@@ -617,4 +619,155 @@ def soft_delete_receipt(receipt_id: int):
                 """,
                 (int(receipt_id),),
             )
+
+
+def _normalize_dimension_name(name: str | None) -> str:
+    text = (name or "").strip()
+    if not text:
+        raise ValueError("名称不能为空")
+    if len(text) > MAX_DIMENSION_NAME_LENGTH:
+        raise ValueError(f"名称长度不能超过{MAX_DIMENSION_NAME_LENGTH}个字符")
+    return text
+
+
+def list_categories_with_usage():
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    c.id,
+                    c.name,
+                    COUNT(r.id) AS receipt_count,
+                    DATE_FORMAT(MAX(r.transaction_time), '%Y-%m-%d %H:%i:%s') AS latest_time
+                FROM categories c
+                LEFT JOIN receipts r ON r.category_id = c.id AND r.is_deleted = 0
+                GROUP BY c.id, c.name
+                ORDER BY c.name
+                """
+            )
+            return cursor.fetchall()
+
+
+def create_category(name: str):
+    final_name = _normalize_dimension_name(name)
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            try:
+                cursor.execute("INSERT INTO categories (name) VALUES (%s)", (final_name,))
+            except IntegrityError as exc:
+                if exc.args and exc.args[0] == 1062:
+                    raise ValueError("分类名称已存在")
+                raise
+
+    return {"name": final_name}
+
+
+def delete_category_with_migration(category_id: int):
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, name FROM categories WHERE id=%s LIMIT 1", (int(category_id),))
+            row = cursor.fetchone()
+            if not row:
+                raise LookupError("分类不存在")
+            if row["name"] == DEFAULT_CATEGORY:
+                raise RuntimeError("默认分类不允许删除")
+
+            other_id = _get_or_create_category_id(cursor, DEFAULT_CATEGORY)
+            cursor.execute("UPDATE receipts SET category_id=%s WHERE category_id=%s", (other_id, int(category_id)))
+            cursor.execute("DELETE FROM categories WHERE id=%s", (int(category_id),))
+
+
+def rename_category(category_id: int, name: str):
+    final_name = _normalize_dimension_name(name)
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, name FROM categories WHERE id=%s LIMIT 1", (int(category_id),))
+            row = cursor.fetchone()
+            if not row:
+                raise LookupError("分类不存在")
+            if row["name"] == DEFAULT_CATEGORY:
+                raise RuntimeError("默认分类不允许修改")
+
+            try:
+                cursor.execute("UPDATE categories SET name=%s WHERE id=%s", (final_name, int(category_id)))
+            except IntegrityError as exc:
+                if exc.args and exc.args[0] == 1062:
+                    raise ValueError("分类名称已存在")
+                raise
+
+    return {"id": int(category_id), "name": final_name}
+
+
+def list_payment_methods_with_usage():
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    pm.id,
+                    pm.name,
+                    COUNT(r.id) AS receipt_count,
+                    DATE_FORMAT(MAX(r.transaction_time), '%Y-%m-%d %H:%i:%s') AS latest_time
+                FROM payment_methods pm
+                LEFT JOIN receipts r ON r.payment_method_id = pm.id AND r.is_deleted = 0
+                GROUP BY pm.id, pm.name
+                ORDER BY pm.name
+                """
+            )
+            return cursor.fetchall()
+
+
+def create_payment_method(name: str):
+    final_name = _normalize_dimension_name(name)
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            try:
+                cursor.execute("INSERT INTO payment_methods (name) VALUES (%s)", (final_name,))
+            except IntegrityError as exc:
+                if exc.args and exc.args[0] == 1062:
+                    raise ValueError("支付方式名称已存在")
+                raise
+
+    return {"name": final_name}
+
+
+def rename_payment_method(payment_method_id: int, name: str):
+    final_name = _normalize_dimension_name(name)
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id FROM payment_methods WHERE id=%s LIMIT 1", (int(payment_method_id),))
+            existing = cursor.fetchone()
+            if not existing:
+                raise LookupError("支付方式不存在")
+
+            try:
+                cursor.execute("UPDATE payment_methods SET name=%s WHERE id=%s", (final_name, int(payment_method_id)))
+            except IntegrityError as exc:
+                if exc.args and exc.args[0] == 1062:
+                    raise ValueError("支付方式名称已存在")
+                raise
+
+    return {"id": int(payment_method_id), "name": final_name}
+
+
+def delete_payment_method_with_migration(payment_method_id: int):
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, name FROM payment_methods WHERE id=%s LIMIT 1",
+                (int(payment_method_id),),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise LookupError("支付方式不存在")
+            if row["name"] == DEFAULT_PAYMENT_METHOD:
+                raise RuntimeError("默认支付方式不允许删除")
+
+            other_id = _get_or_create_payment_method_id(cursor, DEFAULT_PAYMENT_METHOD)
+            cursor.execute(
+                "UPDATE receipts SET payment_method_id=%s WHERE payment_method_id=%s",
+                (other_id, int(payment_method_id)),
+            )
+            cursor.execute("DELETE FROM payment_methods WHERE id=%s", (int(payment_method_id),))
 

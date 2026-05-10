@@ -1,22 +1,23 @@
 ﻿<script setup>
 const text = {
-  merchant: '\u5546\u5bb6',
-  amount: '\u91d1\u989d',
-  category: '\u5206\u7c7b',
-  date: '\u65e5\u671f',
-  paymentMethod: '\u652f\u4ed8\u65b9\u5f0f',
-  actions: '\u64cd\u4f5c',
-  edit: '\u7f16\u8f91',
-  delete: '\u5220\u9664',
-  deleteConfirm: '\u786e\u8ba4\u5220\u9664\u8be5\u8d26\u5355\u5417\uff1f'
+  title: '账单列表',
+  merchant: '商家',
+  amount: '金额',
+  category: '分类',
+  date: '日期',
+  paymentMethod: '支付方式',
+  actions: '操作',
+  edit: '编辑',
+  delete: '删除',
+  deleteConfirm: '确定删除这条账单记录吗？'
 }
 
 const categoryTagMap = {
-  '\u9910\u996e': 'success',
-  '\u4ea4\u901a': 'warning',
-  '\u751f\u6d3b\u7f34\u8d39': 'primary',
-  '\u8d2d\u7269': 'danger',
-  '\u5176\u4ed6': 'info'
+  food: 'success',
+  transport: 'warning',
+  bills: 'primary',
+  shopping: 'danger',
+  other: 'info'
 }
 
 defineProps({
@@ -45,7 +46,8 @@ defineProps({
 const emit = defineEmits(['edit', 'delete', 'page-change', 'size-change'])
 
 function tagType(category) {
-  return categoryTagMap[category] || 'info'
+  const key = String(category || '').trim().toLowerCase()
+  return categoryTagMap[key] || 'info'
 }
 
 function onCurrentChange(page) {
@@ -58,8 +60,12 @@ function onSizeChange(size) {
 </script>
 
 <template>
-  <el-card shadow="never">
-    <el-table :data="data" border stripe v-loading="loading" row-key="id">
+  <el-card shadow="never" class="sr-card">
+    <template #header>
+      <div class="sr-card-header">{{ text.title }}</div>
+    </template>
+
+    <el-table :data="data" stripe v-loading="loading" row-key="id" empty-text="暂无账单数据">
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="merchant" :label="text.merchant" min-width="180" />
       <el-table-column prop="amount" :label="text.amount" width="130" align="right">
@@ -69,7 +75,7 @@ function onSizeChange(size) {
       </el-table-column>
       <el-table-column prop="category" :label="text.category" width="120">
         <template #default="{ row }">
-          <el-tag :type="tagType(row.category)">{{ row.category }}</el-tag>
+          <el-tag :type="tagType(row.category)" effect="plain">{{ row.category }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="transaction_time" :label="text.date" min-width="180" />
@@ -102,7 +108,7 @@ function onSizeChange(size) {
 
 <style scoped>
 .amount {
-  color: #d45050;
+  color: var(--el-color-danger);
   font-weight: 700;
 }
 
