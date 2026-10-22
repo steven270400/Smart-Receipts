@@ -198,3 +198,4 @@ npm run build
 - [API 设计](docs/api_design.md)
 - [数据库设计](docs/database_design.md)
 - [前端说明](frontend/README.md)
+<img width="2560" height="1440" alt="Screenshot 2026-04-22 235055" src="https://github.com/user-attachments/assets/c254fc0c-33c7-489d-a68f-85be6d395f89" />
